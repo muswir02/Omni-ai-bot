@@ -1,0 +1,117 @@
+import logging
+import os
+from telegram import Update, InlineKeyboardButton, InlineUrlButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+import google.generativeai as genai
+
+# Logging Configuration
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+# Credentials Setup
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8937928526:AAHUX43fEItdrf3Qp4GPAA7cUm7w00wVKNs")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")  # Free Gemini API Key here
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+# SPONSOR CHANNEL CONFIGURATION (Monetization & Force Join)
+SPONSOR_CHANNEL = "@YourChannelUsername"  # Apne Telegram Channel ka username yahan daalein
+SPONSOR_LINK = "https://t.me/YourChannelUsername"
+AD_TEXT = "🚀 *Powered by OmniAI* — Join our VIP Channel for daily updates!"
+
+# Force Join Checker
+async def is_user_subscribed(bot, user_id):
+    if SPONSOR_CHANNEL == "@YourChannelUsername":
+        return True # Skip if default username
+    try:
+        member = await bot.get_chat_member(chat_id=SPONSOR_CHANNEL, user_id=user_id)
+        return member.status in ['creator', 'administrator', 'member']
+    except Exception:
+        return True
+
+# Start Command Handler
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    subscribed = await is_user_subscribed(context.bot, user.id)
+    
+    if not subscribed:
+        keyboard = [
+            [InlineKeyboardButton("📢 Join Sponsor Channel", url=SPONSOR_LINK)],
+            [InlineKeyboardButton("✅ Check Subscription", callback_data="check_sub")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"👋 Hello {user.first_name}!\n\nTo use *OmniAI* for FREE, please join our sponsor channel first.",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return
+
+    welcome_text = (
+        f"🤖 *Welcome to OmniAI, {user.first_name}!*\n\n"
+        "Main aapka free AI Assistant hoon. Mujhe koi bhi question, text, ya prompt bhejain:\n"
+        "• 💬 *General Questions & Problem Solving*\n"
+        "• 📝 *Summaries & Translations*\n"
+        "• 📱 *Viral Captions & Social Media Scripts*\n\n"
+        "_Bas apna message type karke bhejain!_"
+    )
+    await update.message.reply_text(welcome_text, parse_mode="Markdown")
+
+# Subscription Check Callback
+async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    subscribed = await is_user_subscribed(context.bot, query.from_user.id)
+    
+    if subscribed:
+        await query.message.edit_text("✅ Subscribed! Ab aap koi bhi question bhej sakte hain.")
+    else:
+        await query.answer("❌ Abhi tak join nahi kiya. Pehle channel join karein!", show_alert=True)
+
+# AI Response Handler
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    subscribed = await is_user_subscribed(context.bot, user_id)
+    
+    if not subscribed:
+        keyboard = [
+            [InlineKeyboardButton("📢 Join Sponsor Channel", url=SPONSOR_LINK)],
+            [InlineKeyboardButton("✅ Check Subscription", callback_data="check_sub")]
+        ]
+        await update.message.reply_text(
+            "⚠️ Bot access karne ke liye pehle sponsor channel join karein!",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    user_text = update.message.text
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    try:
+        if GEMINI_API_KEY:
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(user_text)
+            reply = response.text
+        else:
+            reply = f"🤖 *OmniAI Response:* (API Key missing, reply echo mode):\n\n{user_text}"
+
+        # Footer Ad Insert
+        full_reply = f"{reply}\n\n---\n{AD_TEXT}"
+        await update.message.reply_text(full_reply, parse_mode="Markdown")
+
+    except Exception as e:
+        await update.message.reply_text("❌ Error processing request. Please try again later.")
+
+# Main Application Runner
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(check_sub_callback, pattern="^check_sub$"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    print("OmniAI Bot Active and Running...")
+    app.run_polling()
